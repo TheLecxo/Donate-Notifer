@@ -31,9 +31,23 @@ if not exist ".gitignore" (
         echo .env
         echo *.env
         echo .bun/
+        echo .vscode/
+        echo .idea/
+        echo *.log
+        echo .DS_Store
+        echo Thumbs.db
     ) > .gitignore
     echo [SETUP] .gitignore created.
 )
+
+:: ── Get current branch ────────────────────
+for /f %%i in ('git branch --show-current 2^>nul') do set CURRENT_BRANCH=%%i
+if "%CURRENT_BRANCH%"=="" (
+    echo [ERROR] No branch found. Creating main...
+    git branch -M main
+    set CURRENT_BRANCH=main
+)
+echo [INFO] Current branch: %CURRENT_BRANCH%
 
 :: ── Sync ──────────────────────────────────
 echo.
@@ -47,16 +61,33 @@ if "%msg%"=="" set msg=update
 echo [2/3] Committing...
 git commit -m "%msg%" --no-verify
 
-echo [3/3] Pushing to GitHub...
-git push origin main --force-with-lease
+:: ── Pull latest changes (avoid conflicts) ──
+echo [INFO] Pulling latest changes from remote...
+git pull origin %CURRENT_BRANCH% --no-rebase --allow-unrelated-histories
 if errorlevel 1 (
-    echo [WARN] Push rejected. Force pushing...
-    git push origin main --force
+    echo [WARN] Pull failed. Continuing with push...
 )
+
+:: ── Push to GitHub ────────────────────────
+echo [3/3] Pushing to GitHub...
+git push origin %CURRENT_BRANCH% --force-with-lease
+if errorlevel 1 (
+    echo [WARN] Push rejected. Trying force push...
+    git push origin %CURRENT_BRANCH% --force
+    if errorlevel 1 (
+        echo [ERROR] Force push failed. Check your connection and permissions.
+        pause
+        exit /b 1
+    )
+)
+
+:: ── Set upstream (first push) ─────────────
+git branch --set-upstream-to=origin/%CURRENT_BRANCH% %CURRENT_BRANCH% >nul 2>&1
 
 echo.
 echo ===========================================
-echo   DONE! admin-panel/ is now on GitHub.
-echo   On server: bash admin-panel/manager.sh  then option 2
+echo   ✅ DONE! admin-panel/ is now on GitHub.
+echo   🌐 Repo: https://github.com/TheLecxo/Donate-Notifer
+echo   📂 On server: bash admin-panel/manager.sh  then option 2
 echo ===========================================
 pause
