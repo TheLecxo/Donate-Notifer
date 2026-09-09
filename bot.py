@@ -11,10 +11,9 @@ from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
-from aiogram.enums import ButtonStyle
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -24,7 +23,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from lol import build_emoji_prompt, delete_emoji, get_ai_prm_emojies_list, get_emojis, init_emoji_db, place_ai_prm_emojies, save_emoji, section_emoji
+from emoji_manager import delete_emoji, get_ai_prm_emojies_list, init_emoji_db, premium_emoji_id, replace_standard_emojis, save_emoji, section_emoji
 
 load_dotenv()
 
@@ -83,13 +82,13 @@ def esc(value: Any) -> str:
     return html.escape(str(value or "-"))
 
 
+def html_value(value: Any, emoji_tag: str = "MESSAGE") -> str:
+    return replace_standard_emojis(esc(value), emoji_tag)
+
+
 def section_line(section: str, text: str) -> str:
     emoji = section_emoji(section)
     return f"{emoji} {text}".strip() if emoji else text
-
-
-def plain_premium_emoji_html(text: str) -> str:
-    return re.sub(r'<tg-emoji\s+emoji-id="\d+">(.*?)</tg-emoji>', r"\1", text)
 
 
 def normalize_donation(raw: dict[str, Any]) -> Donate:
@@ -145,8 +144,8 @@ def mark_donation_notified(telegram_id: int, key: str):
 
 def donation_text(donation: Donate, title=None, language="en") -> str:
     labels = {
-        "en": {"title": "New Donate", "username": "Username", "date": "Date", "price": "Price", "message": "Message", "currency": "Rial"},
-        "fa": {"title": "دونیت جدید", "username": "نام کاربری", "date": "تاریخ", "price": "مبلغ", "message": "پیام", "currency": "ریال"},
+        "en": {"title": "New Donate", "username": "Username", "date": "Date", "price": "Price", "message": "Message", "currency": "Toman"},
+        "fa": {"title": "دونیت جدید", "username": "نام کاربری", "date": "تاریخ", "price": "مبلغ", "message": "پیام", "currency": "تومن"},
     }.get(language, TEXT["en"])
     title = title or labels["title"]
     lines = []
@@ -156,7 +155,7 @@ def donation_text(donation: Donate, title=None, language="en") -> str:
         section_line("username", f"<b>{labels['username']}:</b> {esc(donation.username).lstrip('@')}"),
         section_line("date", f"<b>{labels['date']}:</b> {esc(donation.date)}"),
         section_line("price", f"<b>{labels['price']}:</b> {donation.price:,} {labels['currency']}"),
-        section_line("message", f"<b>{labels['message']}:</b> {esc(donation.message)}"),
+        section_line("message", f"<b>{labels['message']}:</b> {html_value(donation.message)}"),
     ))
     return "\n\n".join(lines)
 
@@ -165,12 +164,12 @@ TEXT = {
     "en": {"language": "Choose your Language:", "token": "Send your Daramet API token.",
             "link": "Send your donation link, for example: daramet.com/username",
             "dest": "Where should donation notifications be sent?", "initial_id": "First send the channel or group ID that the bot should use.", "ids": "Send the chat ID for {kind}.",
-            "done": "Your settings are connected successfully.", "dashboard": "Hello {name}\n\nChannel: {channel}\nDonations: {count}\nTotal income: {total:,} Rial",
+            "done": "Your settings are connected successfully.", "dashboard": "Hello {name}\n\nChannel: {channel}\nDonations: {count}\nTotal income: {total:,} Toman",
         "income": "Income status", "delete_account": "Delete account", "delete_confirm": "Are you sure you want to disconnect your account from the bot?", "yes": "Yes", "no": "No", "back": "Back", "donate": "Donate", "channel": "Channel", "group": "Group", "test_unregistered": "Your account is not registered.", "bad": "Invalid input. Please try again."},
     "fa": {"language": "زبان خود را انتخاب کنید", "token": "توکن API اختصاصی دارمتان را ارسال کنید.",
             "link": "لینک دونیت را ارسال کنید، مثال: daramet.com/username",
             "dest": "اطلاع‌رسانی دونیت در کجا انجام شود؟", "initial_id": "ابتدا آیدی چنل یا گروهی که ربات باید در آن اطلاع‌رسانی کند را ارسال کنید.", "ids": "آیدی {kind} را ارسال کنید.",
-        "done": "اطلاعات شما با موفقیت ثبت و متصل شد.", "dashboard": "سلام {name}\n\nچنل شما: {channel}\nتعداد دونیت دریافتی: {count}\nمجموع کل درآمد: {total:,} ریال",
+        "done": "اطلاعات شما با موفقیت ثبت و متصل شد.", "dashboard": "سلام {name}\n\nچنل شما: {channel}\nتعداد دونیت دریافتی: {count}\nمجموع کل درآمد: {total:,} تومن",
         "income": "وضعیت درآمد", "delete_account": "حذف حساب کاربری", "delete_confirm": "آیا مطمئن هستید که می‌خواهید حساب خود را از ربات قطع کنید؟", "yes": "بله", "no": "خیر", "back": "بازگشت", "donate": "دونیت", "channel": "چنل", "group": "گروه", "test_unregistered": "حساب شما ثبت نشده است.", "bad": "ورودی نامعتبر است. دوباره تلاش کنید."},
 }
 
@@ -184,47 +183,90 @@ def plain_t(language, key, **kwargs):
 
 
 BUTTON_EMOJI = {
-    "donate": "💵",
-    "channel": "📢",
-    "group": "📢",
-    "english": "🇬🇧",
-    "persian": "🇮🇷",
+    "donate": "DONATE",
+    "channel": "CHANNEL",
+    "group": "GROUP",
+    "english": "ENGLISH",
+    "persian": "PERSIAN",
 }
 
 
 def button_text(language, key, text):
-    return f"{BUTTON_EMOJI[key]} {text}"
+    return text
+
+
+def button_emoji_id(key: str) -> str:
+    return premium_emoji_id(BUTTON_EMOJI[key])
 
 
 def language_keyboard():
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton(button_text("fa", "persian", "فارسی"), callback_data="lang:fa"),
-        InlineKeyboardButton(button_text("en", "english", "English"), callback_data="lang:en"),
+        inline_button(button_text("fa", "persian", "فارسی"), "lang:fa", "primary", "PERSIAN"),
+        inline_button(button_text("en", "english", "English"), "lang:en", "primary", "ENGLISH"),
     ]])
-
-
-def styled_reply_keyboard():
-    def button(text, style):
-        return KeyboardButton(text, api_kwargs={"style": style.value})
-
-    return ReplyKeyboardMarkup([
-        [button("Primary", ButtonStyle.PRIMARY)],
-        [button("Success", ButtonStyle.SUCCESS)],
-        [button("Danger", ButtonStyle.DANGER)],
-    ], resize_keyboard=True)
 
 
 def main_keyboard(language):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(plain_t(language, "income"), callback_data="income")],
-        [InlineKeyboardButton(plain_t(language, "delete_account"), callback_data="delete_account")],
+        [inline_button(plain_t(language, "income"), "income", "success", "INCOME")],
+        [inline_button(plain_t(language, "delete_account"), "delete_account", "danger", "DELETE_ACCOUNT")],
     ])
+
+
+async def edit_flow_message(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None):
+    query = update.callback_query
+    if query and query.message:
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+        return
+    message_id = context.user_data.get("start_message_id")
+    chat_id = context.user_data.get("start_chat_id") or update.effective_chat.id
+    if message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup,
+            )
+            if update.message:
+                try:
+                    await update.message.delete()
+                except BadRequest:
+                    pass
+            return
+        except BadRequest:
+            pass
+    if update.message:
+        await update.message.delete()
+
+
+def inline_button(text: str, callback_data: str, style: str, emoji_tag: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(
+        text,
+        callback_data=callback_data,
+        api_kwargs={
+            "style": style,
+            "icon_custom_emoji_id": premium_emoji_id(emoji_tag),
+        },
+    )
+
+
+def inline_link_button(text: str, url: str, style: str, emoji_tag: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(
+        text,
+        url=url,
+        api_kwargs={
+            "style": style,
+            "icon_custom_emoji_id": premium_emoji_id(emoji_tag),
+        },
+    )
 
 
 def delete_confirmation_keyboard(language):
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton(plain_t(language, "yes"), callback_data="delete_account:yes"),
-        InlineKeyboardButton(plain_t(language, "no"), callback_data="delete_account:no"),
+        inline_button(plain_t(language, "yes"), "delete_account:yes", "success", "YES"),
+        inline_button(plain_t(language, "no"), "delete_account:no", "danger", "NO"),
     ]])
 
 
@@ -232,7 +274,12 @@ async def donation_keyboard(user, language, bot):
     destinations = json.loads(user["destinations"] or "{}")
     buttons = []
     if user["donation_link"]:
-        buttons.append(InlineKeyboardButton(button_text(language, "donate", plain_t(language, "donate")), url=f"https://daramet.com/{user['donation_link'].lstrip('/')}"))
+        buttons.append(inline_link_button(
+            button_text(language, "donate", plain_t(language, "donate")),
+            f"https://daramet.com/{user['donation_link'].lstrip('/')}",
+            "success",
+            "DONATE",
+        ))
     destination = destinations.get("channel") or destinations.get("group")
     if destination:
         kind = "channel" if destinations.get("channel") else "group"
@@ -244,7 +291,12 @@ async def donation_keyboard(user, language, bot):
                 chat_id = str(destination)
                 chat_id = chat_id[4:] if chat_id.startswith("-100") else chat_id.lstrip("-")
                 destination_url = f"https://t.me/c/{chat_id}"
-            buttons.append(InlineKeyboardButton(button_text(language, kind, plain_t(language, kind)), url=destination_url))
+            buttons.append(inline_link_button(
+                button_text(language, kind, plain_t(language, kind)),
+                destination_url,
+                "primary",
+                "CHANNEL",
+            ))
         except Exception:
             logging.warning("Could not build destination link for %s", destination)
     return InlineKeyboardMarkup([buttons]) if buttons else None
@@ -265,7 +317,9 @@ def emoji_admin_keyboard():
 async def emoji_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in admin_ids():
         return
-    await update.message.reply_text("پنل مدیریت ایموجی‌های پرمیوم", reply_markup=emoji_admin_keyboard())
+    context.user_data["start_message_id"] = update.message.id
+    context.user_data["start_chat_id"] = update.effective_chat.id
+    await edit_flow_message(update, context, "پنل مدیریت ایموجی‌های پرمیوم", emoji_admin_keyboard())
 
 
 async def emoji_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -277,11 +331,11 @@ async def emoji_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
     action = query.data.split(":", 1)[1]
     if action == "list":
         items = get_ai_prm_emojies_list()
-        await query.edit_message_text(f"لیست ایموجی‌ها:\n\n{items}", reply_markup=emoji_admin_keyboard())
+        await query.edit_message_text(f"لیست ایموجی‌ها:\n\n{items}", parse_mode=ParseMode.HTML, reply_markup=emoji_admin_keyboard())
         return
     context.user_data["emoji_action"] = action
     instruction = "TAG | EMOJI_ID | توضیح را ارسال کنید." if action == "save" else "تگ ایموجی را ارسال کنید."
-    await query.edit_message_text(instruction)
+    await query.edit_message_text(instruction, parse_mode=ParseMode.HTML)
 
 
 async def emoji_admin_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -301,8 +355,8 @@ async def emoji_admin_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             return
     except ValueError:
-        result = "فرمت نادرست است. نمونه: CONFIRM | 5296742257146241213 | 😊"
-    await update.message.reply_text(result, reply_markup=emoji_admin_keyboard())
+        result = "فرمت نادرست است. نمونه: CONFIRM | 5296742257146241213 | توضیح"
+    await edit_flow_message(update, context, result, emoji_admin_keyboard())
 
 
 def destination_keyboard(language):
@@ -322,11 +376,13 @@ def destination_keyboard(language):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     init_db()
+    context.user_data["start_message_id"] = update.message.id
+    context.user_data["start_chat_id"] = update.effective_chat.id
     user = get_user(update.effective_user.id)
     if user and user["registered"]:
         await update.message.reply_text(await dashboard_text(user, update.effective_user), parse_mode=ParseMode.HTML, reply_markup=main_keyboard(user["language"]))
         return ConversationHandler.END
-    await update.message.reply_text("Choose your Language:\nزبان خود را انتخاب کنید", reply_markup=language_keyboard())
+    await update.message.reply_text("Choose your Language:\nزبان خود را انتخاب کنید", parse_mode=ParseMode.HTML, reply_markup=language_keyboard())
     return LANGUAGE
 
 
@@ -335,14 +391,14 @@ async def choose_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     language = query.data.split(":", 1)[1]
     save_user(query.from_user.id, language=language)
-    await query.edit_message_text(t(language, "token"))
+    await query.edit_message_text(t(language, "token"), parse_mode=ParseMode.HTML)
     return TOKEN
 
 
 async def receive_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["api_token"] = update.message.text.strip()
     language = get_user(update.effective_user.id)["language"]
-    await update.message.reply_text(t(language, "link"))
+    await edit_flow_message(update, context, t(language, "link"))
     return LINK
 
 
@@ -350,11 +406,11 @@ async def receive_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     link = update.message.text.strip()
     match = re.search(r"(?:daramet\.com/)?([A-Za-z0-9_]+)", link)
     if not match:
-        await update.message.reply_text(t(get_user(update.effective_user.id)["language"], "bad"))
+        await edit_flow_message(update, context, t(get_user(update.effective_user.id)["language"], "bad"))
         return LINK
     context.user_data["donation_link"] = match.group(1)
     language = get_user(update.effective_user.id)["language"]
-    await update.message.reply_text(t(language, "initial_id"))
+    await edit_flow_message(update, context, t(language, "initial_id"))
     return INITIAL_CHAT_ID
 
 
@@ -370,10 +426,10 @@ async def receive_initial_chat_id(update: Update, context: ContextTypes.DEFAULT_
         if chat.type not in ("channel", "group", "supergroup"):
             raise ValueError("expected channel or group")
     except Exception:
-        await update.message.reply_text(t(user["language"], "bad"))
+        await edit_flow_message(update, context, t(user["language"], "bad"))
         return INITIAL_CHAT_ID
     context.user_data["initial_chat"] = {"id": str(chat.id), "kind": "channel" if chat.type == "channel" else "group"}
-    await update.message.reply_text(t(user["language"], "dest"), reply_markup=destination_keyboard(user["language"]))
+    await edit_flow_message(update, context, t(user["language"], "dest"), destination_keyboard(user["language"]))
     return DESTINATIONS
 
 
@@ -393,7 +449,7 @@ async def choose_destinations(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not context.user_data["pending_destinations"]:
         return await finish_registration(update, context)
     kind = context.user_data["pending_destinations"][0]
-    await query.edit_message_text(t(language, "ids", kind=("channel" if kind == "channel" else "group")))
+    await query.edit_message_text(t(language, "ids", kind=("channel" if kind == "channel" else "group")), parse_mode=ParseMode.HTML)
     return CHAT_IDS
 
 
@@ -413,15 +469,15 @@ async def receive_chat_ids(update: Update, context: ContextTypes.DEFAULT_TYPE):
             raise ValueError("expected group")
         chat_id = str(chat.id)
     except Exception:
-        await update.message.reply_text(t(user["language"], "bad"))
+        await edit_flow_message(update, context, t(user["language"], "bad"))
         return CHAT_IDS
     context.user_data["pending_destinations"].pop(0)
     context.user_data["destinations"][kind] = chat_id
     if context.user_data["pending_destinations"]:
         next_kind = context.user_data["pending_destinations"][0]
-        await update.message.reply_text(t(user["language"], "ids", kind=("channel" if next_kind == "channel" else "group")))
+        await edit_flow_message(update, context, t(user["language"], "ids", kind=("channel" if next_kind == "channel" else "group")))
         return CHAT_IDS
-    await update.message.reply_text(t(user["language"], "done"))
+    await edit_flow_message(update, context, t(user["language"], "done"))
     return await finish_registration(update, context)
 
 
@@ -433,7 +489,7 @@ async def finish_registration(update: Update, context: ContextTypes.DEFAULT_TYPE
     if update.callback_query:
         await update.callback_query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=main_keyboard(user["language"]))
     else:
-        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=main_keyboard(user["language"]))
+        await edit_flow_message(update, context, text, main_keyboard(user["language"]))
     return ConversationHandler.END
 
 
@@ -478,47 +534,73 @@ async def dashboard_text(user, telegram_user):
 
 async def income(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    user = get_user(query.from_user.id)
+    if query:
+        await query.answer()
+        user = get_user(query.from_user.id)
+    else:
+        user = get_user(update.effective_user.id)
     try: donations = await fetch_donations(user["api_token"])
     except (httpx.HTTPError, KeyError, TypeError): donations = []
     title = "حمایت" if user["language"] == "fa" else "Donate"
     blocks = [donation_text(item, f"{title} {index}", user["language"]) for index, item in enumerate(reversed(donations), 1)]
     text = "\n\n--------------------------------------\n\n".join(blocks) or "-"
-    markup = InlineKeyboardMarkup([[InlineKeyboardButton(plain_t(user["language"], "back"), callback_data="back")]])
-    try:
+    markup = InlineKeyboardMarkup([[
+        inline_button(plain_t(user["language"], "back"), "back", "danger", "BACK")
+    ]])
+    if query:
         await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
-    except BadRequest as error:
-        if "Entity" not in str(error):
-            raise
-        await query.edit_message_text(plain_premium_emoji_html(text), parse_mode=ParseMode.HTML, reply_markup=markup)
+    else:
+        await edit_flow_message(update, context, text, main_keyboard(user["language"]))
 
 
 async def back_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    user = get_user(query.from_user.id)
-    await query.edit_message_text(await dashboard_text(user, query.from_user), parse_mode=ParseMode.HTML, reply_markup=main_keyboard(user["language"]))
+    if query:
+        await query.answer()
+        user = get_user(query.from_user.id)
+        await query.edit_message_text(await dashboard_text(user, query.from_user), parse_mode=ParseMode.HTML, reply_markup=main_keyboard(user["language"]))
+    else:
+        user = get_user(update.effective_user.id)
+        await edit_flow_message(update, context, await dashboard_text(user, update.effective_user), main_keyboard(user["language"]))
 
 
 async def delete_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    user = get_user(query.from_user.id)
-    await query.edit_message_text(t(user["language"], "delete_confirm"), reply_markup=delete_confirmation_keyboard(user["language"]))
+    if query:
+        await query.answer()
+        user = get_user(query.from_user.id)
+        await query.edit_message_text(t(user["language"], "delete_confirm"), parse_mode=ParseMode.HTML, reply_markup=delete_confirmation_keyboard(user["language"]))
+    else:
+        user = get_user(update.effective_user.id)
+        await edit_flow_message(update, context, t(user["language"], "delete_confirm"), delete_confirmation_keyboard(user["language"]))
 
 
 async def delete_account_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    user = get_user(query.from_user.id)
-    if query.data.endswith(":no"):
-        await query.edit_message_text(await dashboard_text(user, query.from_user), parse_mode=ParseMode.HTML, reply_markup=main_keyboard(user["language"]))
+    if query:
+        await query.answer()
+        user_id = query.from_user.id
+        user = get_user(user_id)
+        is_no = query.data.endswith(":no")
+    else:
+        user_id = update.effective_user.id
+        user = get_user(user_id)
+        is_no = update.message.text in (TEXT["en"]["no"], TEXT["fa"]["no"])
+    if is_no:
+        dashboard = await dashboard_text(user, query.from_user if query else update.effective_user)
+        if query:
+            await query.edit_message_text(dashboard, parse_mode=ParseMode.HTML, reply_markup=main_keyboard(user["language"]))
+        else:
+            await edit_flow_message(update, context, dashboard, main_keyboard(user["language"]))
         return
     with db() as connection:
-        connection.execute("DELETE FROM users WHERE telegram_id = ?", (query.from_user.id,))
-        connection.execute("DELETE FROM notified_donations WHERE telegram_id = ?", (query.from_user.id,))
-    await query.edit_message_text("Choose your Language:\nزبان خود را انتخاب کنید", reply_markup=language_keyboard())
+        connection.execute("DELETE FROM users WHERE telegram_id = ?", (user_id,))
+        connection.execute("DELETE FROM notified_donations WHERE telegram_id = ?", (user_id,))
+    text = "Choose your Language:\nزبان خود را انتخاب کنید"
+    if query:
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=language_keyboard())
+    else:
+        await edit_flow_message(update, context, text, language_keyboard())
 
 
 def test_donation() -> Donate:
@@ -528,7 +610,7 @@ def test_donation() -> Donate:
 async def testdan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(update.effective_user.id)
     if not user or not user["registered"]:
-        await update.message.reply_text(t(user["language"] if user else "en", "test_unregistered"))
+        await edit_flow_message(update, context, t(user["language"] if user else "en", "test_unregistered"))
         return
     markup = await donation_keyboard(user, user["language"], context.bot)
     text = donation_text(test_donation(), language=user["language"])
@@ -543,16 +625,11 @@ async def testdan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if "Entity" not in str(error):
                 logging.error("Could not send test donation to %s: %s", chat_id, error)
                 continue
-            await context.bot.send_message(int(chat_id), plain_premium_emoji_html(text), parse_mode=ParseMode.HTML, reply_markup=markup)
-            sent = True
+            logging.error("Could not send test donation to %s: %s", chat_id, error)
     if sent:
-        await update.message.reply_text("Test donation sent." if user["language"] == "en" else "پیام تست دونیت ارسال شد.")
+        await edit_flow_message(update, context, "Test donation sent." if user["language"] == "en" else "پیام تست دونیت ارسال شد.")
     else:
-        await update.message.reply_text(t(user["language"], "test_unregistered"))
-
-
-async def test_color_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Colored keyboard test", reply_markup=styled_reply_keyboard())
+        await edit_flow_message(update, context, t(user["language"], "test_unregistered"))
 
 
 async def poll_donations(context: ContextTypes.DEFAULT_TYPE):
@@ -592,7 +669,7 @@ async def poll_donations(context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_message(int(chat_id), donation_text(donation, language=row["language"]), parse_mode=ParseMode.HTML, reply_markup=markup)
                 except BadRequest as error:
                     if "Entity" in str(error):
-                        await context.bot.send_message(int(chat_id), plain_premium_emoji_html(donation_text(donation, language=row["language"])), parse_mode=ParseMode.HTML, reply_markup=markup)
+                        logging.error("Could not send donation %s to %s: %s", donation.external_id, chat_id, error)
                     else:
                         logging.error("Could not send donation %s to %s: %s", donation.external_id, chat_id, error)
 
@@ -608,7 +685,6 @@ def build_application():
     application.add_handler(conversation)
     application.add_handler(CommandHandler("emoji", emoji_admin))
     application.add_handler(CommandHandler("testdan", testdan))
-    application.add_handler(CommandHandler("testcolor", test_color_buttons))
     application.add_handler(CallbackQueryHandler(emoji_admin_action, pattern=r"^emoji:"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, emoji_admin_value))
     application.add_handler(CallbackQueryHandler(income, pattern="^income$"))
