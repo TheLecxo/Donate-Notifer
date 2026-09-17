@@ -501,15 +501,25 @@ async def finish_registration(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def api_request(token, endpoint, method="GET", payload=None):
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.request(method, API_ROOT + endpoint, headers={"Authorization": token}, json=payload)
-        response.raise_for_status()
-        return response.json()
+        if response.is_error:
+            logging.warning("Daramet API %s %s returned %s: %s", method, endpoint, response.status_code, response.text[:500])
+            response.raise_for_status()
+        try:
+            return response.json()
+        except ValueError:
+            logging.warning("Daramet API %s %s returned invalid JSON: %s", method, endpoint, response.text[:500])
+            raise
 
 
 def as_list(data):
     if isinstance(data, list): return data
     if isinstance(data, dict):
         for key in ("Donates", "donates", "data", "Data", "items", "Items"):
-            if isinstance(data.get(key), list): return data[key]
+            value = data.get(key)
+            if isinstance(value, list): return value
+            if isinstance(value, dict):
+                nested = as_list(value)
+                if nested: return nested
     return []
 
 
@@ -517,14 +527,44 @@ async def fetch_donations(token):
     return [normalize_donation(item) for item in as_list(await api_request(token, "/Donates/All", "POST", {"page": 1}))]
 
 
+def find_number(data, keys):
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if key.lower() in keys and isinstance(value, (int, float)):
+                return value
+            result = find_number(value, keys)
+            if result is not None:
+                return result
+    elif isinstance(data, list):
+        for value in data:
+            result = find_number(value, keys)
+            if result is not None:
+                return result
+    return None
+
+
+async def fetch_total(token):
+    data = await api_request(token, "/Total")
+    total = find_number(data, {"total", "totalamount", "amount", "price"})
+    count = find_number(data, {"count", "totalcount", "number"})
+    return int(total or 0), int(count or 0)
+
+
 async def dashboard_text(user, telegram_user):
     donations = []
     try: donations = await fetch_donations(user["api_token"])
-    except (httpx.HTTPError, KeyError, TypeError): pass
+    except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+        logging.warning("Could not fetch donations for user %s: %s", user["telegram_id"], error)
+    total = sum(item.price for item in donations)
+    count = len(donations)
+    try:
+        total, count = await fetch_total(user["api_token"])
+    except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+        logging.warning("Could not fetch total for user %s: %s", user["telegram_id"], error)
     channel = json.loads(user["destinations"]).get("channel", "-")
     name = telegram_user.username or telegram_user.first_name
     name = f"@{name.lstrip('@')}" if telegram_user.username else name
-    dashboard = t(user["language"], "dashboard", name=esc(name), channel=esc(channel), count=len(donations), total=sum(item.price for item in donations))
+    dashboard = t(user["language"], "dashboard", name=esc(name), channel=esc(channel), count=count, total=total)
     sections = ("greeting", "channel", "donation_count", "total_income")
     rendered_lines = []
     section_index = 0
