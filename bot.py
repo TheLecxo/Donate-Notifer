@@ -235,8 +235,8 @@ async def edit_flow_message(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 except BadRequest:
                     pass
             return
-        except BadRequest:
-            pass
+        except BadRequest as error:
+            logging.warning("Could not edit flow message %s in chat %s: %s", message_id, chat_id, error)
     if update.message:
         await update.message.delete()
 
@@ -382,7 +382,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user and user["registered"]:
         await update.message.reply_text(await dashboard_text(user, update.effective_user), parse_mode=ParseMode.HTML, reply_markup=main_keyboard(user["language"]))
         return ConversationHandler.END
-    await update.message.reply_text("Choose your Language:\nزبان خود را انتخاب کنید", parse_mode=ParseMode.HTML, reply_markup=language_keyboard())
+    message = await update.message.reply_text(
+        "Choose your Language:\nزبان خود را انتخاب کنید",
+        parse_mode=ParseMode.HTML,
+        reply_markup=language_keyboard(),
+    )
+    context.user_data["start_message_id"] = message.id
     return LANGUAGE
 
 
